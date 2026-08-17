@@ -60,16 +60,16 @@ Tổng kết: **0 / 4 tiêu chí đạt**
 
 | | |
 |---|---|
-| **Triệu chứng** | |
-| **P99 độ trễ đo được** | **… ngày** *(bắt buộc)* |
-| **Lookback đã chọn** | … ngày — vì … |
-| **Nguyên nhân** | |
-| **Cách khắc phục** | |
-| **Bằng chứng** | trước: … hàng · sau: … hàng |
+| **Triệu chứng** | Bảng `gold_feature_daily` bị thiếu hàng (thiếu 455 hàng) ở các ngày trong quá khứ, chỉ những ngày mới nhất mới đủ số lượng bản ghi. |
+| **P99 độ trễ đo được** | **2.73 ngày** *(bắt buộc)* |
+| **Lookback đã chọn** | 3 ngày — vì P99 = 2.73 ngày, chọn 3 ngày sẽ bao phủ được >99% dữ liệu đến trễ mà không làm tăng quá mức khối lượng dữ liệu phải quét lại hàng ngày. |
+| **Nguyên nhân** | Điều kiện lọc incremental `where event_date > max(event_date)` quá khắt khe. Nó chỉ quét những sự kiện xảy ra ở ngày mới nhất. Những sự kiện xảy ra ở ngày cũ nhưng bị kẹt (ví dụ do rớt mạng) và đến muộn sẽ bị bỏ sót vĩnh viễn khi pipeline chạy ở ngày hiện tại. |
+| **Cách khắc phục** | `gold_feature_daily.sql`: Nới rộng điều kiện quét lùi về 3 ngày: `where event_date >= (select max(event_date)...) - INTERVAL 3 DAY`. Đồng thời thêm `unique_key = ['event_date', 'customer_id']` để đảm bảo khi quét lại các ngày cũ, dbt sẽ hợp nhất thay vì nhân bản dữ liệu. |
+| **Bằng chứng** | `gold_feature_daily` đạt đúng **9,100** hàng và giữ nguyên dấu **✓ ok** ở cột ỔN ĐỊNH. |
 
 Vì sao chọn P99 làm căn cứ thay vì `max`? Chi phí của mỗi lựa chọn là gì?
 
-> …
+> Nếu chọn `max` (2.94 ngày ở hiện tại, nhưng có thể lớn hơn ở tương lai nếu có sự cố cá biệt), ta sẽ phải lùi window rất sâu. Chi phí là dbt sẽ phải tốn rất nhiều tài nguyên để liên tục đọc và tính toán lại một lượng dữ liệu lịch sử khổng lồ mỗi ngày. Đổi lại, nếu chọn P99, ta chỉ cần lùi một khoảng vừa đủ (3 ngày) để đảm bảo độ chính xác >99%, giúp cân bằng hoàn hảo giữa hiệu năng của pipeline (đủ nhanh) và chất lượng dữ liệu (đủ chính xác).
 
 ---
 
