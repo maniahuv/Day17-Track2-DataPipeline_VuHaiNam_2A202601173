@@ -77,16 +77,17 @@ Vì sao chọn P99 làm căn cứ thay vì `max`? Chi phí của mỗi lựa ch�
 
 | | |
 |---|---|
-| **Triệu chứng** | |
-| **Nguyên nhân** | |
-| **Ba nhóm giá trị `priority` và cách xử lý từng nhóm** | |
-| **Cách khắc phục** | |
-| **Bằng chứng** | `quarantine_tickets` = … hàng · `dbt test` … pass |
+| **Triệu chứng** | Pipeline vẫn nuốt dữ liệu chạy bình thường, nhưng model AI phân loại chạy sai do bị chèn các giá trị chữ (`urgent`, `high`) và rác (`-1`, `0`, `5`) thay vì các số từ 1 đến 4. |
+| **Nguyên nhân** | Lỗi Schema Evolution: Team backend đổi kiểu cột sang nhãn chữ nhưng pipeline không có Data Contract (`enforced: false`) để chặn lại. Hàm `try_cast` đang dùng bị sai logic: biến các nhãn hợp lệ thành NULL, nhưng lại cho số rác lọt qua. |
+| **Ba nhóm giá trị `priority` và cách xử lý từng nhóm** | Nhóm 1 (số hợp lệ 1..4): Giữ nguyên (ép kiểu int).<br>Nhóm 2 (nhãn chữ: urgent, high, medium, low): Quy đổi tương ứng về 1, 2, 3, 4.<br>Nhóm 3 (rác: -1, 0, P1...): Gán bằng `NULL` để loại bỏ. |
+| **Cách khắc phục** | `normalize_priority.sql`: Viết lại khối `CASE` để phân loại 3 nhóm như trên.<br>`silver_tickets.sql`: Lọc `priority is not null` trước hàm `row_number()` để loại bản ghi lỗi mà không vứt luôn ticket.<br>`quarantine_tickets.sql`: Thêm `where priority is null` để hứng rác.<br>`schema.yml`: Bật `enforced: true` và test `accepted_values: [1, 2, 3, 4]`. |
+| **Bằng chứng** | `quarantine_tickets` = **312** hàng · `dbt test` **9/9** pass |
 
 Câu hỏi thiết kế: nên chặn ở tầng Bronze hay Silver? Vì sao **không** để
 pipeline dừng khi gặp bản ghi lỗi?
 
-> …
+> - **Nên chặn ở tầng Silver.** Tầng Bronze là bản sao thô (raw) của hệ thống nguồn, có nhiệm vụ lưu giữ nguyên trạng lịch sử (tính EL - Extract, Load). Nếu chặn ở Bronze, ta sẽ làm mất dữ liệu gốc vĩnh viễn và không có cơ hội truy vết.
+> - **Không dừng pipeline vì:** Một vài bản ghi lỗi (chiếm % cực nhỏ) không được phép làm đình trệ toàn bộ luồng dữ liệu (có thể chứa hàng triệu bản ghi sạch khác). Việc cách ly (Quarantine) giúp hệ thống vẫn tiếp tục phục vụ dữ liệu sạch cho báo cáo/AI, đồng thời gom dữ liệu bẩn vào một chỗ để kỹ sư dữ liệu xử lý sau (Fault Tolerance).
 
 ---
 
@@ -94,10 +95,10 @@ pipeline dừng khi gặp bản ghi lỗi?
 
 | | |
 |---|---|
-| **Bài đã làm** | A / B / không làm |
-| **Nguyên nhân** | |
-| **Cách khắc phục** | |
-| **Bằng chứng** | |
+| **Bài đã làm** | **Bài A** (Tối ưu truy vấn Dashboard) |
+| **Nguyên nhân** | Lỗi Small-file problem: Dữ liệu bị xé nhỏ thành 5,000 file ngẫu nhiên, không được phân vùng (partition). Cú pháp truy vấn bọc cột thời gian trong hàm `strftime` khiến engine không tận dụng được thống kê min/max của Parquet, buộc phải quét toàn bộ 5 triệu dòng. |
+| **Cách khắc phục** | Dùng `COPY TO` ghi lại dữ liệu: Phân vùng theo ngày (`PARTITION_BY event_date`). Sắp xếp các dòng của cùng khách hàng vào chung một khối (`ORDER BY customer_name`). Định cỡ khối hợp lý (`ROW_GROUP_SIZE 100000`). Sửa câu truy vấn trỏ vào cấu trúc dữ liệu mới để tận dụng Partition Pruning và Row Group Skipping. |
+| **Bằng chứng** | `rows scanned` giảm từ 5,000,000 xuống **137,942** (tối ưu **36.2 lần**). Số file giảm từ 5,000 xuống **14**. Thời gian chạy giảm xuống chỉ còn 8.2ms. |
 
 ---
 
@@ -105,6 +106,6 @@ pipeline dừng khi gặp bản ghi lỗi?
 
 | Nhiệm vụ | Khi tiếp nhận một hệ thống chưa quen, tôi sẽ kiểm tra điều này trước tiên |
 |---|---|
-| 1 | |
-| 2 | |
-| 3 | |
+| 1 | Model có dùng `incremental` không? Nếu có, khai báo `unique_key` và `incremental_strategy` đã đầy đủ chưa để đảm bảo tính ổn định (Idempotent)? |
+| 2 | Mệnh đề lọc thời gian (lookback window) của model incremental có bao phủ được độ trễ thực tế (P99 delay) của dữ liệu nguồn không? |
+| 3 | Các cột quan trọng đã có Data Contract chưa? Hệ thống có bắt lỗi và cách ly (quarantine) bản ghi bẩn thay vì cho sập toàn bộ pipeline không? |
