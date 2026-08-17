@@ -21,6 +21,11 @@ import os
 import pathlib
 import sys
 import time
+import subprocess
+
+if os.environ.get("PYTHONUTF8") != "1":
+    os.environ["PYTHONUTF8"] = "1"
+    sys.exit(subprocess.call([sys.executable] + sys.argv))
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
