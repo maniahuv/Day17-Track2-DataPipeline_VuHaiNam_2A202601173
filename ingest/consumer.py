@@ -53,7 +53,7 @@ TABLE = "bronze_events_stream"
 
 DDL = f"""
 create table if not exists {TABLE} (
-    event_id      varchar,
+    event_id      varchar primary key,
     ticket_id     varchar,
     customer_id   varchar,
     customer_name varchar,
@@ -72,7 +72,7 @@ def write_batch(con: duckdb.DuckDBPyConnection, batch: list[dict]) -> None:
     một hàng mới. Xem khung mã giả ở đầu file.
     """
     con.executemany(
-        f"insert into {TABLE} values (?, ?, ?, ?, ?, ?, ?, ?)",
+        f"insert into {TABLE} values (?, ?, ?, ?, ?, ?, ?, ?) on conflict (event_id) do nothing",
         [
             (
                 r["event_id"], r["ticket_id"], r["customer_id"], r["customer_name"],
@@ -112,9 +112,9 @@ def consume(
             # ── KHỐI CẦN XEM XÉT — nhiệm vụ 5, hạng mục (a) ───────────────
             # Ba dòng dưới đây được phép sắp xếp lại. maybe_crash() mô phỏng
             # `kill -9`: tiến trình chết ngay tại vị trí của nó, không rollback.
-            consumer.commit()                 # ghi nhận offset
-            maybe_crash(batch_no, crash_at)   # sự cố xảy ra tại đây
             write_batch(con, batch)           # ghi dữ liệu
+            maybe_crash(batch_no, crash_at)   # sự cố xảy ra tại đây
+            consumer.commit()                 # ghi nhận offset
             # ─────────────────────────────────────────────────────────────
 
             written += len(batch)
@@ -124,6 +124,7 @@ def consume(
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True)
     ap.add_argument("--topic", required=True)
